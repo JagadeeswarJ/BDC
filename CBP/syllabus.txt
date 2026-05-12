@@ -1,0 +1,85 @@
+LIST OF PROGRAMS / EXPERIMENTS / EXERCISES:
+1. HDFS (Storage)
+A. Hadoop Storage File system
+Your first objective is to create a directory structure in HDFS using HDFS commands.
+Create the local files using Linux commands and move the files to HDFS directory.
+and vice versa.
+I. Write a command to create the directory structure in HDFS.
+II. Write a Command to move file from local Unix/Linux machine to HDFS.
+B. Viewing Data Contents, Files and Directory
+Try to perform these simple steps:
+a) Write HDFS command to see the contents of files in HDFS.
+b) Write HDFS command to see contents of files which are present in HDFS.
+C. Getting Files data from the HDFS to Local Disk
+I. Write an HDFS command to copy the file from HDFS to the local file system.
+To process any data first move the data in HDFS. All files storage in HDFS can be.
+accessed using HDFS commands.
+Lab Instructions:
+i. Your objective is to use HDFS commands to move data to HDFS for processing.
+data.
+2. Map Reduce Programming (Processing data).
+Hadoop Map-Reduce framework is developed using Java, but the framework allows.
+you to write programs in other languages as well.
+A. Word Count
+The word count problem is the most famous using map reduce program. Same thing
+We can do it with java but takes lot of time with huge files, in MR it will process less
+time.
+even with huge and distributed files. The objective is to count the frequency of
+words of a large text.
+Lab Instructions:
+i. Develop MapReduce example program in a MapReduce environment to find out.
+the number of occurrences of each word in a text file
+B. Most Frequent Words Count
+Use the output from the previous program to list the most frequent words with their
+counts.
+Lab Instructions:
+i. Use the same strategy of breaking the programs in three parts. Copy the files from
+the previous exercise and use them as a starting point.
+ii. Load the data from the output by using third filter to load the files.
+3. Data Processing Tool – Hive (NOSQL query-based language)
+Hive command line tool allows you to submit jobs via bash scripts.
+Identifying properties of a data set:
+We have a table 'user data' that contains the following fields:
+data date: string
+user_id: string
+properties: string
+The properties field is formatted as a series of attribute=value pairs.
+Ex: Age=21; state=CA; gender=M;
+Lab Instructions:
+i. Create the table in HIVE using hive nosql based query.
+ii. Fill the table with sample data by using some sample databases.
+iii. Write a program that produces a list of properties with minimum value(min_value),
+largest value(max_value) and number of unique values. Before you start, execute
+the prepare step to load the data into HDFS.
+iv. Generate a count per state.
+Now that extracted the properties, calculate the number of records per state.
+Lab Instructions:
+i. Write a program that lists the states and their count from the data input.
+4. Data Processing Tool – Pig (Latin based scripting lang)
+Pig command line tool like the Hive allows you to submit jobs via bash scripts.
+A. Simple Logs
+We have a set of log files and need to create a job that runs every hour and perform
+some calculations.
+The log files are delimited by a 'tab' character and have the following fields:
+a) site
+b) hour_of_day
+c) page_views
+d) data_date
+The log files are located on the prepare folder. Load them in HDFS at data/ pig/
+simple logs folder and use them as the input.
+Important: In order to load tab delimited files use pigStorage ('\u0001').
+Lab Instructions:
+Create a program to:
+i. Calculate the total views per hour per day.
+ii. Calculate the total views per day.
+iii. Calculate the total counts of each hour across all days.
+iv. We can write word count script by passing text file as input.
+5. SQOOP
+It is used to import and export data from SQL to HDFS and Vice versa.
+Before processing any data first need to import data into HDFS. As of now seen
+importing files into HDFS but using sqoop tool we can import SQL table data into hive
+table.
+I. Create table in HIVE using hive query language.
+II. Import the sql table data into hive using sqoop too.
+III. Export hive table data into local machine and into SQL.
+6. Exploring ARIMA model
