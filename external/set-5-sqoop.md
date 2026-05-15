@@ -1,30 +1,25 @@
 # Set 5 — Sqoop: SQL ⇄ Hadoop
 
-## What Sqoop Is — and Why It Exists
+## What Sqoop Is
 
-Most business data lives in relational databases (MySQL, Oracle, etc.). Hadoop processes data sitting in **HDFS**. Writing a custom JDBC-to-HDFS script for every table is tedious.
-
-**Sqoop = SQL-to-Hadoop.** One command imports an entire RDBMS table into HDFS or directly into a Hive table. The reverse direction is **export**.
+Sqoop moves data between relational databases (MySQL) and Hadoop (HDFS/Hive).
 
 ```
-  MySQL                          Hadoop
-  ┌──────┐    sqoop import     ┌─────────────┐
-  │ tbl  │  ───────────────►   │ HDFS / Hive │
-  │      │  ◄───────────────   │             │
-  └──────┘    sqoop export     └─────────────┘
+MySQL ──sqoop import──► HDFS / Hive
+MySQL ◄──sqoop export── HDFS / Hive
 ```
 
-Under the hood Sqoop launches a **map-only MapReduce job**: multiple mappers each pull a slice of the table by primary-key ranges, in parallel.
+Under the hood Sqoop runs a map-only MapReduce job — multiple mappers each pull a slice of the MySQL table in parallel.
+
+**Memory rule:** `import` = into Hadoop | `export` = out of Hadoop
 
 ---
 
-## I. Create a Table in Hive Using HiveQL
+## I. Create Table in Hive Using HiveQL
 
-We'll create a target table in Hive. (You could also let Sqoop auto-create it via `--create-hive-table`; we show both.)
-
-Prepare MySQL source data first:
+First, create the source data in MySQL:
 ```bash
-mysql -u root -p   # password: cloudera
+mysql -u root -p
 ```
 ```sql
 CREATE DATABASE testdb;
@@ -36,43 +31,55 @@ CREATE TABLE employee (
   salary INT
 );
 
-INSERT INTO employee VALUES (1,'Alice',30000),
-                            (2,'Bob',40000),
-                            (3,'Charlie',50000);
+INSERT INTO employee VALUES (1,'Alice',30000),(2,'Bob',40000),(3,'Charlie',50000);
 exit;
+```
+
+Now create the target Hive table:
+```bash
+hive
+```
+```sql
+CREATE TABLE emp_hive (
+  id     INT,
+  name   STRING,
+  salary INT
+)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
 ```
 
 ---
 
-## II. Import the SQL Table Data Into Hive Using Sqoop
+## II. Import SQL Table Data into Hive Using Sqoop
 
 ```bash
 sqoop import \
   --connect jdbc:mysql://localhost/testdb \
-  --username root --password root \
+  --username root --password cloudera \
   --table employee \
-  --hive-import --create-hive-table --hive-table emp_data \
+  --hive-import \
+  --hive-table emp_hive \
   --m 1
 ```
 
-**Working flag by flag:**
+**Flag breakdown:**
 
 | Flag | What it does |
-|------|--------------|
-| `--connect jdbc:mysql://localhost/testdb` | JDBC URL pointing to the source DB |
-| `--username / --password` | DB credentials |
+|------|-------------|
+| `--connect jdbc:mysql://localhost/testdb` | JDBC URL to the source MySQL database |
+| `--username root --password cloudera` | MySQL credentials |
 | `--table employee` | Source table in MySQL |
-| `--hive-import` | After loading into HDFS, automatically register the data as a Hive table |
-| `--create-hive-table` | Auto-create the Hive table schema based on the MySQL schema |
-| `--hive-table emp_data` | Name to use for the Hive table |
-| `--m 1` | Use one mapper. Needed because the MySQL table has no PK (and our data is tiny); otherwise Sqoop would error asking for `--split-by` |
+| `--hive-import` | Load data into Hive after pulling from MySQL |
+| `--hive-table emp_hive` | Target Hive table name |
+| `--m 1` | Use 1 mapper (needed when table has no primary key) |
 
 Verify in Hive:
 ```bash
 hive
 ```
 ```sql
-SELECT * FROM emp_data;
+SELECT * FROM emp_hive;
 ```
 
 **Expected:**
@@ -86,20 +93,18 @@ SELECT * FROM emp_data;
 
 ## III. Export Hive Table Data — to Local Machine and to SQL
 
-### A) To the local Linux filesystem
+### A) Export to Local Machine
 
-The Hive table's data lives in HDFS at `/user/hive/warehouse/emp_data`. Pull it down:
+The Hive table data lives in HDFS. Use `hdfs dfs -get` to pull it locally:
 ```bash
-hdfs dfs -get /user/hive/warehouse/emp_data ~/emp_data
-ls ~/emp_data
-cat ~/emp_data/part-m-00000
+hdfs dfs -get /user/hive/warehouse/emp_hive /home/cloudera/emp_local
+ls /home/cloudera/emp_local
+cat /home/cloudera/emp_local/part-m-00000
 ```
 
-**Working:** `hdfs dfs -get <hdfs_path> <local_path>` copies HDFS files back to Linux. Sqoop writes mapper output as `part-m-00000`, `part-m-00001`, etc.
+### B) Export Back to MySQL (Sqoop Export)
 
-### B) Back to MySQL
-
-First create the destination table — Sqoop does **not** auto-create on export:
+First create the destination table in MySQL — Sqoop does **not** auto-create on export:
 ```bash
 mysql -u root -p
 ```
@@ -113,20 +118,18 @@ CREATE TABLE emp_export (
 exit;
 ```
 
-Then run the export:
+Then run Sqoop export:
 ```bash
 sqoop export \
   --connect jdbc:mysql://localhost/testdb \
-  --username root --password root \
+  --username root --password cloudera \
   --table emp_export \
-  --export-dir /user/hive/warehouse/emp_data \
+  --export-dir /user/hive/warehouse/emp_hive \
   --m 1
 ```
 
-**Working:**
-- `--export-dir` points at the HDFS directory holding the rows to push out.
-- Sqoop reads each line, splits it by the default delimiter, and runs an `INSERT` per row into MySQL.
-- `--m 1` keeps it to a single mapper (use more for bigger tables).
+- `--export-dir` points to the HDFS directory holding the Hive table data.
+- Sqoop reads each line and INSERTs it into MySQL.
 
 Verify:
 ```bash
@@ -137,24 +140,15 @@ USE testdb;
 SELECT * FROM emp_export;
 ```
 
-**Expected:** the three Alice/Bob/Charlie rows back in MySQL.
-
----
-
-## Direction Cheat Sheet
-
-| You want to... | Command |
-|----------------|---------|
-| Pull a MySQL table into HDFS | `sqoop import --target-dir <hdfs>` |
-| Pull a MySQL table straight into Hive | `sqoop import --hive-import --hive-table <name>` |
-| Push an HDFS dir back to MySQL | `sqoop export --export-dir <hdfs> --table <mysql_tbl>` |
+**Expected:** Alice, Bob, Charlie rows back in MySQL.
 
 ---
 
 ## Things to Remember
 
-- Direction: **`import` = into Hadoop**, **`export` = out of Hadoop**. Always.
-- Sqoop runs **map-only** jobs — no reducer, because data is partitioned by PK ranges.
-- `--m 1` = single mapper, single output file. Higher values need either a primary key or `--split-by <col>`.
-- Export requires the **target table to exist already** in MySQL with the right schema.
-- The Hive warehouse path defaults to `/user/hive/warehouse/<table_name>` — that's where the files actually live.
+- `import` = MySQL → Hadoop. `export` = Hadoop → MySQL. **Never confuse direction.**
+- Sqoop runs **map-only** MapReduce — no reducer.
+- `--m 1` = single mapper. Required when table has no primary key (otherwise Sqoop errors asking for `--split-by`).
+- For export, the MySQL target table **must already exist** with the correct schema.
+- Hive warehouse path: `/user/hive/warehouse/<table_name>/` — that's where `--export-dir` should point.
+- `--hive-import` + `--hive-table` lets Sqoop directly register data in Hive without a separate LOAD step.

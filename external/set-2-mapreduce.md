@@ -1,45 +1,55 @@
-# Set 2 — MapReduce: Word Count
+# Set 2 — MapReduce: Word Frequency Count
 
-## What MapReduce Is — and Why It Works
+## What MapReduce Does
 
-Counting words in a 10 GB text file on one machine takes hours. **MapReduce** spreads that work across many machines using three phases:
+Three phases process data in parallel across a cluster:
 
 ```
-Input file in HDFS
-       │
-       ▼
-  ┌──────────┐
-  │   MAP    │   each mapper reads its block,
-  │          │   emits (word, 1) for every word
-  └────┬─────┘
-       │  (hello,1) (world,1) (hello,1) (data,1) ...
-       ▼
-  ┌──────────┐
-  │ SHUFFLE  │   framework groups values by key
-  │  + SORT  │
-  └────┬─────┘
-       │  hello → [1,1]   world → [1]   data → [1]
-       ▼
-  ┌──────────┐
-  │  REDUCE  │   each reducer sums its key's values
-  │          │
-  └────┬─────┘
-       │
-       ▼
-  Output in HDFS: hello 2, world 1, data 1
+Input file → MAP (emit word,1) → SHUFFLE/SORT (group by word) → REDUCE (sum) → Output
 ```
-
-The genius is that **Map runs in parallel on each block where it lives** (data locality), and the Shuffle phase moves only the small intermediate keys, not the raw input.
 
 ---
 
-## Develop a MapReduce Program to Count Word Occurrences
+## The Problem
 
-### Minimal Java Code — `WordCount.java`
+Count the frequency of each word (case-insensitive) in the given data:
+
+```
+Bus, Car, bus, car, train, car, bus, car, train, bus, TRAIN,BUS, buS, caR, CAR, car, BUS, TRAIN
+```
+
+Expected output (after lowercasing everything):
+```
+bus     7
+car     7
+train   4
+```
+
+---
+
+## Step 1 — Create the Input File
+
+```bash
+nano words.txt
+```
+Paste exactly:
+```
+Bus, Car, bus, car, train, car, bus, car, train, bus, TRAIN,BUS, buS, caR, CAR, car, BUS, TRAIN
+```
+Save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+Upload to HDFS:
+```bash
+hadoop fs -mkdir -p /user/cloudera/wc/input
+hadoop fs -put words.txt /user/cloudera/wc/input/
+```
+
+---
+
+## Step 2 — Java Code: `WordCount.java`
 
 ```java
 import java.io.IOException;
-import java.util.StringTokenizer;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
@@ -55,11 +65,15 @@ public class WordCount {
   public static class TokenMapper extends Mapper<Object, Text, Text, IntWritable> {
     private final IntWritable one = new IntWritable(1);
     private Text word = new Text();
+
     public void map(Object key, Text value, Context ctx) throws IOException, InterruptedException {
-      StringTokenizer it = new StringTokenizer(value.toString());
-      while (it.hasMoreTokens()) {
-        word.set(it.nextToken());
-        ctx.write(word, one);
+      // split on commas and whitespace, lowercase everything
+      String[] tokens = value.toString().toLowerCase().split("[,\\s]+");
+      for (String token : tokens) {
+        if (!token.isEmpty()) {
+          word.set(token);
+          ctx.write(word, one);
+        }
       }
     }
   }
@@ -86,19 +100,18 @@ public class WordCount {
 }
 ```
 
-### Compile, Package, Run
+---
+
+## Step 3 — Compile, Package, Run
 
 ```bash
 # Compile
 javac -classpath $(hadoop classpath) -d wc_classes WordCount.java
+
+# Package into a JAR
 jar -cvf wc.jar -C wc_classes/ .
 
-# Prepare input
-echo "hello world hello hadoop big data hadoop" > input.txt
-hadoop fs -mkdir -p /user/cloudera/wc/input
-hadoop fs -put input.txt /user/cloudera/wc/input/
-
-# Run
+# Run on HDFS
 hadoop jar wc.jar WordCount /user/cloudera/wc/input /user/cloudera/wc/output
 
 # View result
@@ -107,41 +120,32 @@ hadoop fs -cat /user/cloudera/wc/output/part-r-00000
 
 **Expected output:**
 ```
-big     1
-data    1
-hadoop  2
-hello   2
-world   1
+bus     7
+car     7
+train   4
+```
+
+To re-run, delete old output first:
+```bash
+hadoop fs -rm -r /user/cloudera/wc/output
 ```
 
 ---
 
-## How Each Piece Works
+## How Each Part Works
 
-### The Mapper
-- Hadoop's `TextInputFormat` (default) hands each line of the input to `map()` as a `Text` value (the key is the byte offset, which we ignore).
-- `StringTokenizer` splits the line on whitespace.
-- For each token we emit `(word, 1)`. This is the heart of the "Map" step: emit a key for every observation, with a value of 1.
+**Mapper** — reads one line, lowercases it, splits on commas and spaces using regex `[,\\s]+`, emits `(word, 1)` for each token.
 
-### The Shuffle (free, automatic)
-- The framework gathers all `(word, 1)` pairs across all mappers, sorts them by key, and groups them.
-- All `1`s for `"hello"` end up at the same reducer.
+**Shuffle/Sort** — automatic. Framework groups all `1`s by key: `bus → [1,1,1,1,1,1,1]`, `car → [1,1,1,1,1,1,1]`, `train → [1,1,1,1]`.
 
-### The Reducer
-- For each unique key, `reduce()` is called once with an iterable of all its values.
-- We loop through and sum — that gives the count.
-- We emit `(word, total_count)`.
-
-### The `main` Driver
-- Builds a `Job`, points it at the Mapper/Reducer classes and the input/output paths, and submits it to YARN.
-- **Output path must NOT exist beforehand** — Hadoop creates it and refuses to overwrite (a safety feature). Delete with `hadoop fs -rm -r /user/cloudera/wc/output` to re-run.
+**Reducer** — sums the list for each key and emits `(word, total)`.
 
 ---
 
 ## Things to Remember
 
-- Three phases: **Map → Shuffle/Sort → Reduce**.
-- Mapper output types and Reducer input types **must match**.
-- The Reducer is also a good **Combiner** for sum — set `job.setCombinerClass(SumReducer.class)` to add a mini-reduce on each mapper, cutting network traffic.
-- `Text` and `IntWritable` are Hadoop's serializable replacements for `String` and `int`.
-- Output filename is always `part-r-00000` (one file per reducer).
+- **Case-insensitive**: use `.toLowerCase()` in the mapper, otherwise Bus and bus are counted separately.
+- **Comma handling**: the data has commas, so use `split("[,\\s]+")` not `StringTokenizer` (which only splits on whitespace).
+- Output directory **must not exist** — Hadoop refuses to overwrite. Delete before re-running.
+- `Text` = Hadoop's String, `IntWritable` = Hadoop's int. They are serializable for network transfer.
+- Phases: **Map → Shuffle/Sort → Reduce** (Shuffle is automatic, you don't write it).

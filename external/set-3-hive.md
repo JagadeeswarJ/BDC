@@ -1,38 +1,28 @@
-# Set 3 — Hive: Analyzing a `user_data` Table
+# Set 3 — Hive: user_data Table
 
-## What Hive Is — and Why It Exists
+## What Hive Is
 
-Writing raw Java MapReduce for every query is painful. **Hive** lets you write SQL-like queries (**HiveQL**) and compiles them to MapReduce jobs.
+Hive lets you write SQL-like queries (HiveQL) on data stored as plain files in HDFS. No Java MapReduce needed — Hive compiles your query to MapReduce automatically.
 
-Key idea: **schema-on-read**. The actual data sits as plain text files in HDFS; Hive's metastore just records "this folder's files have these columns". You can drop and recreate the schema without touching the data.
-
-```
-HiveQL  ──►  Hive compiler  ──►  MapReduce  ──►  reads HDFS files
-```
+**Key idea:** schema-on-read. Data is a plain text file in HDFS; the Hive metastore just says "this folder has these columns."
 
 ---
 
-## The Problem
+## The Table Structure
 
-A table `user_data` has three fields:
+Table `user_data` has three fields:
 
-| Field | Type |
-|-------|------|
-| `data_date`  | string |
-| `user_id`    | string |
-| `properties` | string |
+| Field | Type | Example |
+|-------|------|---------|
+| `data_date`  | string | `2026-04-01` |
+| `user_id`    | string | `u1` |
+| `properties` | string | `Age=25;state=Telangana;gender=M;` |
 
-The `properties` field is semi-structured: `Age=21;state=CA;gender=M;`.
-
-We need to:
-1. Create the Hive table.
-2. Load sample data.
-3. Produce min, max, and unique count per property.
-4. Generate count of records per state.
+The `properties` field contains key=value pairs separated by `;`.
 
 ---
 
-## i. Create the Table
+## i. Create the Table in Hive
 
 ```sql
 CREATE TABLE user_data (
@@ -44,25 +34,24 @@ ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
 STORED AS TEXTFILE;
 ```
 
-**Working:**
-- `ROW FORMAT DELIMITED FIELDS TERMINATED BY ','` tells Hive the underlying file is CSV; each line splits into 3 columns at commas.
-- `STORED AS TEXTFILE` = plain text (default). The data folder for this table will live under `/user/hive/warehouse/user_data/` by default.
-- Because `properties` is a single STRING column holding `Age=21;state=CA;gender=M;`, we'll parse it at query time using built-in functions.
+- `ROW FORMAT DELIMITED FIELDS TERMINATED BY ','` — tells Hive the file is CSV; each line is split into 3 columns at commas.
+- `STORED AS TEXTFILE` — data lives as plain text in HDFS under `/user/hive/warehouse/user_data/`.
 
 ---
 
 ## ii. Fill the Table With Sample Data
 
-Local file `user_data.csv`:
+Create a local file `user_data.csv`:
 ```
-2026-04-01,u1,Age=21;state=CA;gender=M;
-2026-04-02,u2,Age=25;state=NY;gender=F;
-2026-04-03,u3,Age=30;state=CA;gender=M;
-2026-04-04,u4,Age=40;state=TX;gender=M;
-2026-04-05,u5,Age=21;state=NY;gender=F;
+2026-04-01,u1,Age=25;state=Telangana;gender=M;
+2026-04-02,u2,Age=30;state=AndhraPradesh;gender=F;
+2026-04-03,u3,Age=22;state=Telangana;gender=M;
+2026-04-04,u4,Age=35;state=Karnataka;gender=F;
+2026-04-05,u5,Age=28;state=AndhraPradesh;gender=M;
+2026-04-06,u6,Age=22;state=Telangana;gender=F;
 ```
 
-Push it to HDFS, then load it into Hive:
+Upload to HDFS and load into Hive:
 ```bash
 hadoop fs -put user_data.csv /tmp/
 ```
@@ -71,15 +60,14 @@ LOAD DATA INPATH '/tmp/user_data.csv' INTO TABLE user_data;
 SELECT * FROM user_data;
 ```
 
-**Working:**
-- `LOAD DATA INPATH` *moves* the file from `/tmp/` into the table's warehouse directory.
-- Use `LOAD DATA LOCAL INPATH` if the file is on the Linux filesystem instead.
+- `LOAD DATA INPATH` **moves** the file from `/tmp/` into the Hive warehouse directory.
+- Use `LOAD DATA LOCAL INPATH` if the file is on the Linux filesystem directly.
 
 ---
 
-## iii. Min, Max, and Unique Count of Each Property
+## iii. Min, Max, and Unique Count Per Property
 
-**The parsing trick:** `str_to_map(properties, ';', '=')` converts `"Age=21;state=CA;gender=M;"` into a map `{Age:21, state:CA, gender:M}`. Then `LATERAL VIEW explode(...)` un-nests that map into one row per (key, value).
+**The trick:** `str_to_map(properties, ';', '=')` converts `"Age=25;state=Telangana;gender=M;"` into a map `{Age:25, state:Telangana, gender:M}`. Then `LATERAL VIEW explode(...)` turns each map entry into its own row.
 
 ```sql
 SELECT prop_key,
@@ -91,22 +79,22 @@ LATERAL VIEW explode(str_to_map(properties, ';', '=')) p AS prop_key, prop_value
 GROUP BY prop_key;
 ```
 
-**Working step-by-step:**
-1. `str_to_map(properties, ';', '=')` — splits the string by `;` first to get pairs, then by `=` inside each pair to form a map.
-2. `LATERAL VIEW explode(...)` — turns each map entry into its own row, adding two new columns: `prop_key`, `prop_value`.
-3. `GROUP BY prop_key` — collects all rows for `Age`, all rows for `state`, all rows for `gender`.
-4. `MIN`, `MAX`, `COUNT(DISTINCT)` — aggregated per property.
+**How it works step by step:**
+1. `str_to_map(properties, ';', '=')` — splits by `;` to get pairs, then by `=` inside each pair → a map.
+2. `LATERAL VIEW explode(...)` — un-nests the map into rows; adds columns `prop_key` and `prop_value`.
+3. `GROUP BY prop_key` — collects all rows for `Age`, `state`, `gender` separately.
+4. `MIN`, `MAX`, `COUNT(DISTINCT)` — aggregates per property.
 
-**Expected:**
+**Expected output:**
 ```
-Age      21   40   4
-gender   F    M    2
-state    CA   TX   3
+Age     22  35  4
+gender  F   M   2
+state   AndhraPradesh  Telangana  3
 ```
 
 ---
 
-## iv. Count Records Per State
+## iv. Count Per State
 
 ```sql
 SELECT prop_value AS state, COUNT(*) AS cnt
@@ -116,24 +104,23 @@ WHERE prop_key = 'state'
 GROUP BY prop_value;
 ```
 
-**Working:**
-- Same explode trick to get one row per (property_key, value).
-- `WHERE prop_key = 'state'` filters down to only state rows.
-- `GROUP BY prop_value` + `COUNT(*)` gives the count per state.
+- Same explode trick, but `WHERE prop_key = 'state'` filters to only state rows.
+- `GROUP BY prop_value` + `COUNT(*)` gives count per state.
 
-**Expected:**
+**Expected output:**
 ```
-CA   2
-NY   2
-TX   1
+AndhraPradesh   2
+Karnataka       1
+Telangana       3
 ```
 
 ---
 
 ## Things to Remember
 
-- Hive = **SQL over HDFS files**; metadata in a metastore, data as plain files.
-- `LATERAL VIEW explode` is the canonical way to turn a collection column (array/map) into rows.
-- `str_to_map(str, pairDelim, kvDelim)` parses a `k=v;k=v` string into a map.
-- Difference from regular SQL: no row-level updates by default; Hive is built for batch analytics, not OLTP.
-- Aggregations like `GROUP BY`, `MIN`, `MAX`, `COUNT(DISTINCT)` all translate into MapReduce jobs under the hood.
+- Hive = **SQL over HDFS files**. Data is plain text; schema is in the metastore.
+- `LATERAL VIEW explode` turns a map/array column into multiple rows — essential for semi-structured data.
+- `str_to_map(str, pairDelim, kvDelim)` parses `k=v;k=v` strings into a Hive map.
+- `LOAD DATA INPATH` **moves** the file (removes it from `/tmp/`). `LOCAL INPATH` copies from the Linux disk.
+- Hive is for **batch analytics**, not row-level updates. No UPDATE/DELETE in basic Hive.
+- Aggregations `MIN`, `MAX`, `COUNT(DISTINCT)`, `GROUP BY` all run as MapReduce jobs underneath.

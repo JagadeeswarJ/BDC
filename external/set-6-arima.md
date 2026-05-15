@@ -1,119 +1,106 @@
-# Set 6 — Exploring the ARIMA Model
+# Set 6 — Sales Prediction Using ARIMA
 
 ## What ARIMA Is
 
-**ARIMA** = **AutoRegressive Integrated Moving Average**. It's a classical statistical technique for analyzing and **forecasting time-series data** — i.e. one numerical value evolving over time (daily sales, monthly rainfall, stock close).
+**ARIMA(p, d, q)** — a classical model for forecasting time-series data (like daily/monthly sales).
 
-It is especially useful when the data shows **trends** or **seasonality** over time.
+| Letter | Meaning | Parameter | What it does |
+|--------|---------|-----------|-------------|
+| **AR** | AutoRegression | `p` | Uses the last `p` values to predict the next |
+| **I**  | Integration    | `d` | Differences the series `d` times to remove trend |
+| **MA** | Moving Average | `q` | Uses the last `q` forecast errors to correct predictions |
 
-It combines three components, denoted **ARIMA(p, d, q)**:
+**Why these three?**
+- Real sales data has **trends** (mean keeps rising/falling) → `d` removes the trend by differencing.
+- Today's sales are influenced by recent past → `AR` captures that.
+- Random shocks (sudden spike) linger → `MA` captures that.
 
-| Letter | Stands for | Parameter | Intuition |
-|--------|------------|-----------|-----------|
-| **AR** | AutoRegression       | `p` | Today's value depends on the previous `p` values |
-| **I**  | Integration          | `d` | Difference the series `d` times to make it stationary |
-| **MA** | Moving Average       | `q` | Today's value depends on the previous `q` forecast errors |
-
-### Why each piece?
-
-- **AR (p)** — captures momentum / inertia. If yesterday and the day before were both high, today is likely high too.
-- **I (d)** — most real series **trend** (mean keeps drifting). You can't fit constant-parameter models to trending data. Solution: take differences (`y_t − y_{t-1}`) until the trend goes away — that's what `d` controls.
-- **MA (q)** — captures the lingering effect of past shocks/errors. A sudden spike yesterday may partially still affect today.
-
-After fitting in the differenced space, the model undoes the differencing to give forecasts in original units.
+A safe default for exam: **ARIMA(1, 1, 1)**
 
 ---
 
-## Choosing `(p, d, q)`
+## Sales Prediction Program
 
-1. **`d`** — Apply the **ADF test** (Augmented Dickey-Fuller). p < 0.05 ⇒ series is stationary, stop. Otherwise increment `d` and difference again.
-2. **`p`** — Examine the **PACF** (Partial AutoCorrelation Function) plot. The lag at which it "cuts off" suggests `p`.
-3. **`q`** — Examine the **ACF** (AutoCorrelation Function) plot. The lag at which it "cuts off" suggests `q`.
+### Input Data — `sales.csv`
 
-A common safe starting point for textbook problems is **ARIMA(1, 1, 1)**.
+```
+Month,Sales
+1,200
+2,220
+3,210
+4,240
+5,260
+6,250
+7,280
+8,300
+9,290
+10,320
+11,340
+12,330
+```
 
----
-
-## Minimal Python Program (Exam-Ready)
+### Python Code
 
 ```python
 import pandas as pd
 import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 
-# Step 1: Load dataset (sales.csv in the same folder)
+# Load the sales data
 data = pd.read_csv("sales.csv")
-
-# Step 2: Select the column to forecast
 series = data['Sales']
 
-# Step 3: Plot the original data
+# Plot original data
 plt.plot(series)
-plt.title("Original Data")
+plt.title("Sales Data")
+plt.xlabel("Month")
+plt.ylabel("Sales")
 plt.show()
 
-# Step 4: Fit the ARIMA model
+# Fit ARIMA model
 model = ARIMA(series, order=(1, 1, 1))
 model_fit = model.fit()
 
-# Step 5: Forecast the next 5 values
+# Forecast next 5 months
 forecast = model_fit.forecast(steps=5)
-print("Forecasted Values:")
+print("Forecasted Sales for next 5 months:")
 print(forecast)
 
-# Step 6: Plot forecast alongside the history
+# Plot original + forecast
 plt.plot(series, label='Original')
-plt.plot(range(len(series), len(series) + 5), forecast, label='Forecast')
+plt.plot(range(len(series), len(series) + 5), forecast, label='Forecast', color='red')
 plt.legend()
+plt.title("Sales Prediction using ARIMA")
 plt.show()
+```
+
+### Run It
+
+```bash
+python sales_arima.py
 ```
 
 ---
 
 ## How Each Step Works
 
-### Step 1 — Load the data
-`pd.read_csv` reads the file into a `DataFrame`. The CSV is assumed to have at least one numerical column (here `Sales`) — possibly also a date column, but ARIMA itself just needs the values in chronological order.
+**Load data** — `pd.read_csv` reads the CSV into a DataFrame. We extract the `Sales` column as a Series (values in time order).
 
-### Step 2 — Select the series
-ARIMA is **univariate** — it forecasts one column. We pull out `data['Sales']` as a pandas `Series` indexed by row order.
+**Plot original** — always visualize first to check for trend (if the line goes up/down, you need `d=1`).
 
-### Step 3 — Visualize
-Always plot first. Eyeballing tells you:
-- Is there a trend? (suggests `d ≥ 1`)
-- Is there seasonality? (would need **SARIMA** instead)
-- Any obvious outliers?
+**Fit model** — `ARIMA(series, order=(1,1,1))` builds the model. `.fit()` finds the best AR and MA coefficients using Maximum Likelihood Estimation.
 
-### Step 4 — Fit the model
-`ARIMA(series, order=(1,1,1))` constructs the model with `p=1, d=1, q=1`. Calling `.fit()` runs **Maximum Likelihood Estimation** to find the AR coefficients φ, MA coefficients θ, and the noise variance that best match the data.
+**Forecast** — `model_fit.forecast(steps=5)` predicts the next 5 values. Internally: applies fitted AR/MA equations in the differenced space, then undoes the differencing to give predictions in original sales units.
 
-### Step 5 — Forecast
-`model_fit.forecast(steps=5)` projects 5 time steps beyond the last observation. Internally:
-- It applies the fitted AR/MA equations in the differenced space.
-- Then **undoes the differencing** (the "I" part) to give predictions in the original scale.
-
-### Step 6 — Plot
-We append the forecast onto the original timeline at indices `[len(series), len(series)+5)`. This makes the join between history and forecast visible.
-
----
-
-## Quick Comparison
-
-| Model | When to use |
-|-------|-------------|
-| **AR(p)**     | Series strongly depends on its own recent past |
-| **MA(q)**     | Series shocked by random noise |
-| **ARMA(p,q)** | Already stationary, mix of the two |
-| **ARIMA(p,d,q)** | Trending (non-stationary) series |
-| **SARIMA**    | + seasonal pattern (weekly, yearly, etc.) |
+**Plot forecast** — append the 5 forecasted points after the last observed index so you can visually see where history ends and prediction begins.
 
 ---
 
 ## Things to Remember
 
-- ARIMA's three letters: **AR(p)** for the past values, **I(d)** for differencing, **MA(q)** for past errors.
-- **Stationarity is the precondition.** Mean and variance must not drift over time. That's why `d` exists.
-- Diagnose with: **ADF test → d**, **PACF → p**, **ACF → q**.
-- After fitting, the **residuals should look like white noise** (no pattern, mean ≈ 0). That's how you confirm the model captured the signal.
-- ARIMA needs an **evenly-spaced univariate** series. No missing time stamps; one value per period.
-- For seasonality, jump to **SARIMA(p,d,q)(P,D,Q,s)** where `s` is the season length (e.g. 12 for monthly data with yearly cycle).
+- ARIMA needs the data to be **stationary** (stable mean and variance). The `d` parameter achieves this by differencing: `y_t - y_{t-1}`.
+- `order=(p, d, q)` — common exam default is `(1, 1, 1)`.
+- ARIMA is **univariate** — it forecasts one column at a time.
+- After fitting, check: residuals should look like **white noise** (random, no pattern). If they show a pattern, the model didn't capture everything.
+- Choosing parameters: `d` → ADF test | `p` → PACF plot | `q` → ACF plot.
+- For data with seasonal patterns (e.g. December always spikes), use **SARIMA** instead.
