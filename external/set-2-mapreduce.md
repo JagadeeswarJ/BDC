@@ -2,23 +2,25 @@
 
 ## What MapReduce Does
 
-Three phases process data in parallel across a cluster:
+Three phases process data in parallel:
 
 ```
-Input file → MAP (emit word,1) → SHUFFLE/SORT (group by word) → REDUCE (sum) → Output
+Input → MAP (emit word,1) → SHUFFLE/SORT (group by word) → REDUCE (sum) → Output
 ```
+
+We write the mapper and reducer in **Python**. Hadoop runs them using its built-in **Streaming** utility — no Java needed.
 
 ---
 
 ## The Problem
 
-Count the frequency of each word (case-insensitive) in the given data:
+Count the frequency of each word (case-insensitive) in:
 
 ```
 Bus, Car, bus, car, train, car, bus, car, train, bus, TRAIN,BUS, buS, caR, CAR, car, BUS, TRAIN
 ```
 
-Expected output (after lowercasing everything):
+Expected output:
 ```
 bus     7
 car     7
@@ -32,13 +34,60 @@ train   4
 ```bash
 nano words.txt
 ```
-Paste exactly:
+Paste this line:
 ```
 Bus, Car, bus, car, train, car, bus, car, train, bus, TRAIN,BUS, buS, caR, CAR, car, BUS, TRAIN
 ```
-Save: `Ctrl+O`, Enter, `Ctrl+X`.
+Save: `Ctrl+O` → Enter → `Ctrl+X`
 
-Upload to HDFS:
+---
+
+## Step 2 — Create mapper.py
+
+```bash
+nano mapper.py
+```
+Paste:
+```python
+import sys, re
+
+for line in sys.stdin:
+    for word in re.split(r'[,\s]+', line.lower().strip()):
+        if word:
+            print(word + "\t1")
+```
+Save: `Ctrl+O` → Enter → `Ctrl+X`
+
+**What it does:** reads each line → lowercase → split on commas/spaces → print `word\t1` for each token.
+
+---
+
+## Step 3 — Create reducer.py
+
+```bash
+nano reducer.py
+```
+Paste:
+```python
+import sys
+from collections import defaultdict
+
+counts = defaultdict(int)
+for line in sys.stdin:
+    word, _ = line.strip().split('\t')
+    counts[word] += 1
+
+for word, cnt in counts.items():
+    print(word + "\t" + str(cnt))
+```
+Save: `Ctrl+O` → Enter → `Ctrl+X`
+
+**What it does:** reads `word\t1` lines → sums count per word → prints `word\ttotal`.
+
+---
+
+## Step 4 — Upload Input to HDFS
+
 ```bash
 hadoop fs -mkdir -p /user/cloudera/wc/input
 hadoop fs -put words.txt /user/cloudera/wc/input/
@@ -46,86 +95,38 @@ hadoop fs -put words.txt /user/cloudera/wc/input/
 
 ---
 
-## Step 2 — Java Code: `WordCount.java`
+## Step 5 — Run the MapReduce Job
 
-```java
-import java.io.IOException;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.Text;
-import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.hadoop.mapreduce.Reducer;
-import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
-import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-
-public class WordCount {
-
-  public static class TokenMapper extends Mapper<Object, Text, Text, IntWritable> {
-    private final IntWritable one = new IntWritable(1);
-    private Text word = new Text();
-
-    public void map(Object key, Text value, Context ctx) throws IOException, InterruptedException {
-      // split on commas and whitespace, lowercase everything
-      String[] tokens = value.toString().toLowerCase().split("[,\\s]+");
-      for (String token : tokens) {
-        if (!token.isEmpty()) {
-          word.set(token);
-          ctx.write(word, one);
-        }
-      }
-    }
-  }
-
-  public static class SumReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
-    public void reduce(Text key, Iterable<IntWritable> vals, Context ctx) throws IOException, InterruptedException {
-      int sum = 0;
-      for (IntWritable v : vals) sum += v.get();
-      ctx.write(key, new IntWritable(sum));
-    }
-  }
-
-  public static void main(String[] args) throws Exception {
-    Job job = Job.getInstance(new Configuration(), "wordcount");
-    job.setJarByClass(WordCount.class);
-    job.setMapperClass(TokenMapper.class);
-    job.setReducerClass(SumReducer.class);
-    job.setOutputKeyClass(Text.class);
-    job.setOutputValueClass(IntWritable.class);
-    FileInputFormat.addInputPath(job, new Path(args[0]));
-    FileOutputFormat.setOutputPath(job, new Path(args[1]));
-    System.exit(job.waitForCompletion(true) ? 0 : 1);
-  }
-}
+```bash
+hadoop jar /usr/lib/hadoop-mapreduce/hadoop-streaming.jar \
+  -input   /user/cloudera/wc/input \
+  -output  /user/cloudera/wc/output \
+  -mapper  mapper.py \
+  -reducer reducer.py \
+  -file    mapper.py \
+  -file    reducer.py
 ```
+
+> `hadoop-streaming.jar` is a **pre-installed Hadoop tool** — you don't write or compile it. It acts as a bridge that feeds HDFS data into your Python scripts via stdin/stdout, exactly like a shell pipe.
+>
+> `-file mapper.py` and `-file reducer.py` tell Hadoop to ship your local Python files to the cluster nodes before the job starts.
 
 ---
 
-## Step 3 — Compile, Package, Run
+## Step 6 — View the Result
 
 ```bash
-# Compile
-javac -classpath $(hadoop classpath) -d wc_classes WordCount.java
-
-# Package into a JAR
-jar -cvf wc.jar -C wc_classes/ .
-
-# Run on HDFS
-hadoop jar wc.jar WordCount /user/cloudera/wc/input /user/cloudera/wc/output
-
-# View result
-hadoop fs -cat /user/cloudera/wc/output/part-r-00000
+hadoop fs -cat /user/cloudera/wc/output/part-00000
 ```
 
-**Expected output:**
+**Expected:**
 ```
 bus     7
 car     7
 train   4
 ```
 
-To re-run, delete old output first:
+If you need to re-run, delete the output folder first:
 ```bash
 hadoop fs -rm -r /user/cloudera/wc/output
 ```
@@ -134,18 +135,19 @@ hadoop fs -rm -r /user/cloudera/wc/output
 
 ## How Each Part Works
 
-**Mapper** — reads one line, lowercases it, splits on commas and spaces using regex `[,\\s]+`, emits `(word, 1)` for each token.
+**Mapper** — gets one line at a time from stdin. Lowercases it, splits on commas and spaces, emits `word\t1` for every token.
 
-**Shuffle/Sort** — automatic. Framework groups all `1`s by key: `bus → [1,1,1,1,1,1,1]`, `car → [1,1,1,1,1,1,1]`, `train → [1,1,1,1]`.
+**Shuffle/Sort** — done automatically by Hadoop. Groups all the `1`s by key: `bus → [1,1,1,1,1,1,1]`.
 
-**Reducer** — sums the list for each key and emits `(word, total)`.
+**Reducer** — gets the grouped lines from stdin. Adds up the counts and prints the total.
 
 ---
 
 ## Things to Remember
 
-- **Case-insensitive**: use `.toLowerCase()` in the mapper, otherwise Bus and bus are counted separately.
-- **Comma handling**: the data has commas, so use `split("[,\\s]+")` not `StringTokenizer` (which only splits on whitespace).
-- Output directory **must not exist** — Hadoop refuses to overwrite. Delete before re-running.
-- `Text` = Hadoop's String, `IntWritable` = Hadoop's int. They are serializable for network transfer.
-- Phases: **Map → Shuffle/Sort → Reduce** (Shuffle is automatic, you don't write it).
+- `line.lower()` — makes it case-insensitive (`Bus` and `bus` both become `bus`).
+- `re.split(r'[,\s]+', ...)` — splits on commas **and** spaces (plain `split()` misses commas).
+- `\t` is the key-value separator — mapper emits `word\t1`, reducer reads `word\t1`.
+- Output dir must **not exist** before running — Hadoop refuses to overwrite.
+- The `.jar` in the run command is Hadoop's own streaming tool, not your code.
+- Phases: **Map → Shuffle/Sort → Reduce** — Shuffle is automatic, you never write it.
