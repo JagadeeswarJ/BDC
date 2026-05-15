@@ -1,4 +1,4 @@
-# Set 6 — Sales Prediction Using ARIMA
+# Set 4 — Sales Prediction Using ARIMA
 
 ## What ARIMA Is
 

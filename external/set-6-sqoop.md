@@ -1,4 +1,4 @@
-# Set 5 — Sqoop: SQL ⇄ Hadoop
+# Set 6 — Sqoop: SQL ⇄ Hadoop
 
 ## What Sqoop Is
 

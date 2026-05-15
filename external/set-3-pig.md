@@ -1,4 +1,4 @@
-# Set 4 — Pig: Student Dataset
+# Set 3 — Pig: Student Dataset (LOAD, STORE, DUMP, DESCRIBE)
 
 ## What Pig Is
 

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv set-3-hive.md _hive.tmp)",
+      "Bash(mv set-4-pig.md _pig.tmp)",
+      "Bash(mv set-5-sqoop.md _sqoop.tmp)",
+      "Bash(mv set-6-arima.md _arima.tmp)",
+      "Bash(mv _pig.tmp set-3-pig.md)"
+    ]
+  }
+}

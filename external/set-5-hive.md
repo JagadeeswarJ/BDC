@@ -1,4 +1,4 @@
-# Set 3 — Hive: user_data Table
+# Set 5 — Hive: user_data Table
 
 ## What Hive Is
 
