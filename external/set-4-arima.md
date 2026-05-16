@@ -46,31 +46,32 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 
-# Load the sales data
+# Step 1: Load dataset
 data = pd.read_csv("sales.csv")
+
+# Step 2: Select column
 series = data['Sales']
 
-# Plot original data
+# Step 3: Plot original data
 plt.plot(series)
-plt.title("Sales Data")
-plt.xlabel("Month")
-plt.ylabel("Sales")
+plt.title("Original Data")
 plt.show()
 
-# Fit ARIMA model
+# Step 4: Apply ARIMA model
 model = ARIMA(series, order=(1, 1, 1))
 model_fit = model.fit()
 
-# Forecast next 5 months
+# Step 5: Forecast next 5 values
 forecast = model_fit.forecast(steps=5)
-print("Forecasted Sales for next 5 months:")
+
+print("Forecasted Values:")
 print(forecast)
 
-# Plot original + forecast
+# Step 6: Plot forecast
 plt.plot(series, label='Original')
-plt.plot(range(len(series), len(series) + 5), forecast, label='Forecast', color='red')
+plt.plot(range(len(series), len(series) + 5), forecast, label='Forecast')
+
 plt.legend()
-plt.title("Sales Prediction using ARIMA")
 plt.show()
 ```
 
